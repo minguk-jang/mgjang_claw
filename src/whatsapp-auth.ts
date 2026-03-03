@@ -15,6 +15,7 @@ import readline from 'readline';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
@@ -30,6 +31,8 @@ const logger = pino({
 // Check for --pairing-code flag and phone number
 const usePairingCode = process.argv.includes('--pairing-code');
 const phoneArg = process.argv.find((_, i, arr) => arr[i - 1] === '--phone');
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 3;
 
 function askQuestion(prompt: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -43,6 +46,10 @@ function askQuestion(prompt: string): Promise<string> {
 
 async function connectSocket(phoneNumber?: string, isReconnect = false): Promise<void> {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+  const { version, isLatest } = await fetchLatestBaileysVersion();
+  if (!isLatest) {
+    console.log(`Using latest WhatsApp Web version: ${version.join('.')}`);
+  }
 
   if (state.creds.registered && !isReconnect) {
     fs.writeFileSync(STATUS_FILE, 'already_authenticated');
@@ -61,11 +68,11 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
     printQRInTerminal: false,
     logger,
     browser: Browsers.macOS('Chrome'),
+    version,
   });
 
   if (usePairingCode && phoneNumber && !state.creds.me) {
     // Request pairing code after a short delay for connection to initialize
-    // Only on first connect (not reconnect after 515)
     setTimeout(async () => {
       try {
         const code = await sock.requestPairingCode(phoneNumber!);
@@ -106,11 +113,22 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
         fs.writeFileSync(STATUS_FILE, 'failed:qr_timeout');
         console.log('\n✗ QR code timed out. Please try again.');
         process.exit(1);
-      } else if (reason === 515) {
-        // 515 = stream error, often happens after pairing succeeds but before
-        // registration completes. Reconnect to finish the handshake.
-        console.log('\n⟳ Stream error (515) after pairing — reconnecting...');
-        connectSocket(phoneNumber, true);
+      } else if (reason === 515 || reason === 405 || reason === 428) {
+        // 515/405/428 can happen transiently during pairing handshake.
+        // Retry a few times before failing.
+        reconnectAttempts++;
+        if (reconnectAttempts <= MAX_RECONNECT_ATTEMPTS) {
+          console.log(
+            `\n⟳ Stream error (${reason}) during pairing — reconnecting (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`,
+          );
+          setTimeout(() => {
+            connectSocket(phoneNumber, true);
+          }, 1000);
+        } else {
+          fs.writeFileSync(STATUS_FILE, `failed:${reason}`);
+          console.log(`\n✗ Connection failed after retries (${reason}). Please try again.`);
+          process.exit(1);
+        }
       } else {
         fs.writeFileSync(STATUS_FILE, `failed:${reason || 'unknown'}`);
         console.log('\n✗ Connection failed. Please try again.');

@@ -6,6 +6,7 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WASocket,
+  fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
@@ -54,6 +55,10 @@ export class WhatsAppChannel implements Channel {
     fs.mkdirSync(authDir, { recursive: true });
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
+    const { version, isLatest } = await fetchLatestBaileysVersion();
+    if (!isLatest) {
+      logger.info({ version }, 'Using latest WhatsApp Web version from Baileys');
+    }
 
     this.sock = makeWASocket({
       auth: {
@@ -63,6 +68,7 @@ export class WhatsAppChannel implements Channel {
       printQRInTerminal: false,
       logger,
       browser: Browsers.macOS('Chrome'),
+      version,
     });
 
     this.sock.ev.on('connection.update', (update) => {
@@ -70,7 +76,7 @@ export class WhatsAppChannel implements Channel {
 
       if (qr) {
         const msg =
-          'WhatsApp authentication required. Run /setup in Claude Code.';
+          'WhatsApp authentication required. Run /setup to re-authenticate.';
         logger.error(msg);
         exec(
           `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,

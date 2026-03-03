@@ -15,7 +15,6 @@ import {
   GROUPS_DIR,
   IDLE_TIMEOUT,
 } from './config.js';
-import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 import { CONTAINER_RUNTIME_BIN, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
@@ -142,6 +141,12 @@ function buildVolumeMounts(
     containerPath: '/home/node/.claude',
     readonly: false,
   });
+  const codexAuthDir = path.join(homeDir, '.codex');
+  mounts.push({
+    hostPath: codexAuthDir,
+    containerPath: '/home/node/.codex',
+    readonly: false,
+  });
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
@@ -175,14 +180,6 @@ function buildVolumeMounts(
   }
 
   return mounts;
-}
-
-/**
- * Read allowed secrets from .env for passing to the container via stdin.
- * Secrets are never written to disk or mounted as files.
- */
-function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
@@ -265,12 +262,8 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    // Pass secrets via stdin (never written to disk or mounted as files)
-    input.secrets = readSecrets();
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
-    // Remove secrets from input so they don't appear in logs
-    delete input.secrets;
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';

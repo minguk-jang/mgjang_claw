@@ -55,10 +55,8 @@ log "Container runtime: $CONTAINER_RUNTIME"
 
 # 3. Check credentials
 CREDENTIALS="missing"
-if [ -f "$PROJECT_ROOT/.env" ]; then
-  if grep -qE "^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=" "$PROJECT_ROOT/.env" 2>/dev/null; then
-    CREDENTIALS="configured"
-  fi
+if [ -f "$HOME/.codex/auth.json" ]; then
+  CREDENTIALS="configured"
 fi
 log "Credentials: $CREDENTIALS"
 

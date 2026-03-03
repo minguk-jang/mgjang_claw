@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Push"
+  short_description: "Add, commit, and push current branch with one trigger"
+  default_prompt: "/gitpush"
